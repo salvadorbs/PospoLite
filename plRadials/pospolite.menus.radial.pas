@@ -63,9 +63,6 @@ unit PospoLite.Menus.Radial;
 {$warnings off}
 {$hints off}
 {$define elif:=else if}
-{$ifndef windows}
-  {$fatal This component only works on Windows}
-{$endif}
 
 //if you want to turn on radial menu debug painting mode, uncomment line below:
 {.$define PLXRADIALMENU_DEBUG}
@@ -75,8 +72,12 @@ interface
 uses
   Classes, SysUtils, FileUtil, Forms, Controls, Graphics, Dialogs, LCLProc,
   LCLIntf, LMessages, BGRABitmap, BGRABitmapTypes, ImgList, ActnList, strutils,
-  ExtCtrls, LResources, windows, math, LazUTF8, GraphUtil, Menus, simpletimer,
-  fgl;
+  ExtCtrls, LResources, math, LazUTF8, GraphUtil, Menus, simpletimer, lcltype,
+  fgl
+  {$ifdef windows}
+    , windows
+  {$endif}
+;
 
 type
 
@@ -218,14 +219,19 @@ type
     FTimingType: TplxTimingType;
     FBmpAlpha: byte;
     FBmpAngle: TplxAngleType;
+    procedure DoPaintForm(Sender: TObject);
+    procedure SetCircleShape;
     procedure SetGlobalOpacity(AValue: byte);
     procedure OnDeactivateEv(Sender: TObject);
-    procedure OnTimerEv(Sender: TObject);
+    procedure OnTimerEv(const Sender: TObject);
     procedure OnCloseEv(Sender: TObject; var CloseAction: TCloseAction);
+    procedure PaintForm;
   protected
     procedure Premultiply(BMP: TBGRABitmap);
+    {$ifdef windows}
     procedure MakePNGWnd(WND: TCustomForm; bgraPNG: TBGRABitmap; bAlpha: Byte);
-    procedure WMActivate(var Msg: TWMActivate); message WM_ACTIVATE;
+    {$endif}
+    procedure WMActivate(var Msg: TLMActivate); message LM_ACTIVATE;
 
     procedure DrawBody(bmp: TBGRABitmap);
     procedure DrawItem(bmp: TBGRABitmap; ind: integer);
@@ -362,9 +368,11 @@ type
     property OnChange;
   end;
 
+{$ifdef windows}
 function BGRAPNGWnd(hWnd: HWND; hdcDst: HDC; pptDst: PPoint; psize: PSize; hdcSrc: HDC;
   pptSrc: PPoint; crKey: TColor; pblend: PBlendFunction; dwFlags: DWORD): BOOL; stdcall;
   external User32 name 'UpdateLayeredWindow';
+{$endif}
 procedure GetVisibleItems(constref initems: TplxRadialMenuItems; out outitems: TplxRadialMenuItems);
 
 implementation
@@ -430,7 +438,7 @@ function PointInPolygon(Point: TPoint; Polygon: array of TPoint): Boolean;
 var
   rgn: HRGN;
 begin
-  rgn := windows.CreatePolygonRgn(Polygon, Length(Polygon), WINDING);
+  rgn := CreatePolygonRgn(Polygon, Length(Polygon), WINDING);
   Result := PtInRegion(rgn, Point.X, Point.Y);
   DeleteObject(rgn);
 end;
@@ -785,7 +793,7 @@ begin
   FFont.Assign(Screen.SystemFont);
   FFont.Quality:=fqCleartypeNatural;
 
-  //FForm:=TplxRadialForm.Create(Self, AOwner as TCustomForm);
+  FForm:=TplxRadialForm.Create(Self, AOwner as TCustomForm);
 end;
 
 destructor TplxCustomRadialMenu.Destroy;
@@ -796,7 +804,7 @@ begin
   FStack.Free;
   FStyle.Free;
   FMetrics.Free;
-  //FForm.Free;
+  FForm.Free;
 
   inherited Destroy;
 end;
@@ -837,7 +845,28 @@ procedure TplxRadialForm.SetGlobalOpacity(AValue: byte);
 begin
   if FGlobalOpacity=AValue then Exit;
   FGlobalOpacity:=AValue;
+
+  PaintForm;
+end;
+
+procedure TplxRadialForm.DoPaintForm(Sender: TObject);
+begin
   PaintRadial;
+end;
+
+procedure TplxRadialForm.SetCircleShape;
+var
+  Shape: TBitmap;
+begin
+  Shape := TBitmap.Create;
+  try
+    Shape.Width := Self.Width;
+    Shape.Height := Self.Height;
+    Shape.Canvas.Ellipse(0, 0, Width, Height);
+    Self.SetShape(Shape);
+  finally
+    Shape.Free;
+  end;
 end;
 
 procedure TplxRadialForm.OnDeactivateEv(Sender: TObject);
@@ -845,7 +874,7 @@ begin
   ActivateTimer(ttClose);
 end;
 
-procedure TplxRadialForm.OnTimerEv(Sender: TObject);
+procedure TplxRadialForm.OnTimerEv(const Sender: TObject);
 begin
   if not FController.Metrics.Animation then begin
     case FTimingType of
@@ -860,7 +889,7 @@ begin
       end;
     end;
 
-    PaintRadial;
+    PaintForm;
     FTimer.Enabled:=false;
   end;
   case FTimingType of
@@ -870,7 +899,9 @@ begin
 
       if FBmpAngle=0 then begin
         XPoint:=ScreenToClient(Mouse.CursorPos);
-        PaintRadial;
+
+        PaintForm;
+
         FTimer.Enabled:=false;
         exit;
       end;
@@ -880,20 +911,31 @@ begin
       IncAngle(FBmpAngle, -20);
 
       if FBmpAngle<=-180 then begin
-        PaintRadial;
+        PaintForm;
+
         Close;
         FTimer.Enabled:=false;
         exit;
       end;
     end;
   end;
-  PaintRadial;
+
+  PaintForm;
 end;
 
 procedure TplxRadialForm.OnCloseEv(Sender: TObject;
   var CloseAction: TCloseAction);
 begin
   CloseAction:=caFree;
+end;
+
+procedure TplxRadialForm.PaintForm;
+begin
+  {$ifdef windows}
+  PaintRadial;
+  {$else}
+  Self.Invalidate;
+  {$endif}
 end;
 
 procedure TplxRadialForm.Premultiply(BMP: TBGRABitmap);
@@ -914,6 +956,7 @@ Begin
   end;
 end;
 
+{$ifdef windows}
 procedure TplxRadialForm.MakePNGWnd(WND: TCustomForm; bgraPNG: TBGRABitmap;
   bAlpha: Byte);
 var
@@ -938,23 +981,31 @@ begin
 
   BGRAPNGWnd(WND.Handle, 0, nil, @Size, bgraPNG.Bitmap.Canvas.Handle, @pt, 0, @bf, ULW_ALPHA);
 end;
+{$endif}
 
-procedure TplxRadialForm.WMActivate(var Msg: TWMActivate);
+procedure TplxRadialForm.WMActivate(var Msg: TLMActivate);
 begin
   if (Msg.Active <> WA_INACTIVE) then
-    SendMessage(Self.PopupParent.Handle, WM_NCACTIVATE, WPARAM(True), -1);
+    SendMessage(Self.PopupParent.Handle, LM_NCACTIVATE, WPARAM(True), 0);
 
   inherited;
 end;
 
 procedure TplxRadialForm.DrawBody(bmp: TBGRABitmap);
 var
-  r, rr: ValReal;
+  r, rr, border: ValReal;
 begin
   r:=pX(FController.Metrics.R);
   rr:=r-1-pX(FController.Metrics.Border);
   rr:=rr*(FBmpAlpha/255);
-  bmp.EllipseAntialias(r, r, (r-pX(1))*(FBmpAlpha/255), (r-pX(1))*(FBmpAlpha/255), ColorToBGRA(FController.Style.Border), 1, ColorToBGRA(FController.Style.Border));
+  
+  {$ifdef windows}
+  border := pX(1);
+  {$else}
+  border := 0;
+  {$endif}
+  
+  bmp.EllipseAntialias(r, r, (r-border)*(FBmpAlpha/255), (r-border)*(FBmpAlpha/255), ColorToBGRA(FController.Style.Border), 1, ColorToBGRA(FController.Style.Border));
   DrawMoreBtns(bmp);
   bmp.EllipseAntialias(r, r, rr, rr, ColorToBGRA(FController.Style.Background), 1, ColorToBGRA(FController.Style.Background));
 end;
@@ -1154,31 +1205,37 @@ begin
     DrawArrow(bmp);
 
     Premultiply(bmp);
+    {$ifdef windows}
     MakePNGWnd(self,bmp,FGlobalOpacity);
+    {$else}
+    bmp.Draw(Self.Canvas, 0, 0, True);
+    {$endif}
   finally
     bmp.Free;
   end;
 end;
-
 procedure TplxRadialForm.ActivateTimer(att: TplxTimingType);
 begin
   FTimingType:=att;
 
   case FTimingType of
     ttShow: begin
-      FTimer.Enabled:=false;
+      if Assigned(FTimer) then
+        FTimer.Enabled:=false;
       FBmpAlpha:=0;
       FBmpAngle:=-180;
 
-      PaintRadial;
+      PaintForm;
       Show;
+
+      SetCircleShape();
     end;
     ttClose: begin
       FTimer.Enabled:=false;
       FBmpAlpha:=255;
       FBmpAngle:=0;
 
-      PaintRadial;
+      PaintForm;
     end;
   end;
 
@@ -1191,7 +1248,8 @@ begin
 
   XPoint.x:=X;
   XPoint.y:=Y;
-  if not FTimer.Enabled then PaintRadial;
+  if not FTimer.Enabled then
+    PaintForm;
 end;
 
 procedure TplxRadialForm.MouseDown(Button: TMouseButton; Shift: TShiftState; X,
@@ -1225,7 +1283,7 @@ begin
   inherited MouseLeave;
 
   XPoint:=TPoint.Zero;
-  PaintRadial;
+  PaintForm;
 end;
 
 procedure TplxRadialForm.KeyPress(var Key: char);
@@ -1254,7 +1312,12 @@ begin
   Application.AddOnDeactivateHandler(@OnDeactivateEv);
   OnClose:=@OnCloseEv;
 
+  {$ifndef windows}
+  DoubleBuffered := True;
+  OnPaint := @DoPaintForm;
+  {$else}
   SetWindowLong(Self.Handle, GWL_EXSTYLE, GetWindowLong(Self.Handle, GWL_EXSTYLE) or WS_EX_NOACTIVATE);
+  {$endif}
 end;
 
 destructor TplxRadialForm.Destroy;
@@ -1365,7 +1428,7 @@ begin
   end;
   UsunOrazMaluj:
   FController.FStack.Remove(FController.FStack.Last);
-  PaintRadial;
+  PaintForm;
   NieRobNic:
 end;
 
@@ -1384,7 +1447,7 @@ begin
     it.Free;
   end;
 
-  PaintRadial;
+  PaintForm;
 end;
 
 procedure TplxRadialForm.Prepare;
@@ -1395,7 +1458,7 @@ begin
   //WAŻNE! TRZEBA WYCZYŚCIĆ STOS
   FController.FStack.Clear;
 
-  PaintRadial;
+  PaintForm;
 end;
 
 procedure TplxRadialForm.ShowRadialAt(Pnt: TPoint);
