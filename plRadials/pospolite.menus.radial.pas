@@ -804,7 +804,8 @@ begin
   FStack.Free;
   FStyle.Free;
   FMetrics.Free;
-  FForm.Free;
+  if Assigned(FForm) then
+    FForm.Free;
 
   inherited Destroy;
 end;
@@ -927,15 +928,19 @@ procedure TplxRadialForm.OnCloseEv(Sender: TObject;
   var CloseAction: TCloseAction);
 begin
   CloseAction:=caFree;
+  FController.FForm := nil;
 end;
 
 procedure TplxRadialForm.PaintForm;
 begin
-  {$ifdef windows}
-  PaintRadial;
-  {$else}
-  Self.Invalidate;
-  {$endif}
+  if Assigned(FController.FForm) then
+  begin
+    {$ifdef windows}
+    PaintRadial;
+    {$else}
+    Self.Invalidate;
+    {$endif}
+  end;
 end;
 
 procedure TplxRadialForm.Premultiply(BMP: TBGRABitmap);
